@@ -137,6 +137,30 @@
 (defun acjd-get-line (s e)
   (propertize #1=(buffer-substring s e) 'anything-realvalue #1#))
 
+(defun acjd-allclasses-simple-name (class-long-name)
+  (with-current-buffer (find-file-noselect anything-c-javadoc-classes-cache-filename t t)
+    (goto-char (point-min))
+    (search-forward class-long-name)
+    (search-forward "\t")
+    (let ((start (point))
+          (end (progn
+                 (search-forward "\t")
+                 (backward-char 1)
+                 (point))))
+      (buffer-substring start end))))
+
+(defun acjd-allclasses-dirname (class-long-name)
+  (with-current-buffer (find-file-noselect anything-c-javadoc-classes-cache-filename t t)
+    (goto-char (point-min))
+    (search-forward class-long-name)
+    (search-forward "\t")
+    (search-forward "\t")
+    (let ((start (point))
+          (end (progn
+                 (end-of-line)
+                 (point))))
+      (buffer-substring start end))))
+
 (defun acjd-source-base-classes (ass)
   (append
    ass
@@ -147,21 +171,21 @@
       . (("Browse"
           . (lambda (c)
               (browse-url (format "%s%s.html#skip-navbar_top"
-                                  (get-text-property 0 'acjd-dirname c)
+                                  (acjd-allclasses-dirname c)
                                   (replace-regexp-in-string "\\." "/" c)))))
          ("Browse package"
           . (lambda (c)
               (browse-url
                (format "%spackage-summary.html#skip-navbar_top"
                        (url-file-directory
-                        (concat (get-text-property 0 'acjd-dirname c)
+                        (concat (acjd-allclasses-dirname c)
                                 (replace-regexp-in-string "\\." "/" c)))))))
          ("Insert class name at point"
-          . (lambda (c) (insert (get-text-property 0 'acjd-simple-name c))))
+          . (lambda (c) (insert (acjd-allclasses-simple-name c))))
          ("Insert fully qualified class name at point"
           . (lambda (c) (insert (substring-no-properties c))))
          ("Copy class name in kill-ring"
-          . (lambda (c) (kill-new (get-text-property 0 'acjd-simple-name c))))
+          . (lambda (c) (kill-new acjd-allclasses-simple-name c)))
          ("Copy fully qualified class name in kill-ring"
           . (lambda (c) (kill-new (substring-no-properties c)))))))))
 
@@ -319,9 +343,8 @@ Strips out default port numbers, etc."
               (lambda (buf)
                 (with-temp-file cache-file
                   (prog1 nil
-                    (prin1 (with-current-buffer buf
-                             (buffer-substring (point-min) (point-max)))
-                           (current-buffer)))))))))
+                    (insert (with-current-buffer buf
+                             (buffer-string))))))))))
     (when regeneratep
       (message "Generating javadoc cache...(this may take a while)")
       (cache cache-file javadoc-dirs create-cand-buffer)
@@ -330,9 +353,13 @@ Strips out default port numbers, etc."
       (erase-buffer)
       (let ((b (find-file-noselect cache-file t t)))
         (unwind-protect
-             (insert (with-current-buffer b
-                       (goto-char (point-min))
-                       (read (current-buffer))))
+            (mapcar
+             (lambda (line)
+               (if (and (> (length line) 0)
+                        (not (string= "\t" (substring line 0 1))))
+                   (insert (concat line "\n"))))
+             (split-string (with-current-buffer b
+                             (buffer-string)) "\n"))
           (kill-buffer b))))))
 
 (defcustom anything-c-javadoc-paren-face nil
@@ -350,7 +377,6 @@ Strips out default port numbers, etc."
       (loop for d in javadoc-dirs
             do (funcall create-cand-buffer d (current-buffer))
             finally do
-            (sort-lines nil (point-min) (point-max))
             (replace-text "&lt;" "<")
             (replace-text "&gt;" ">")
             (anything-aif anything-c-javadoc-paren-face
@@ -379,13 +405,8 @@ Strips out default port numbers, etc."
                                (+ nonl) ">" (group (+ nonl)) "</A>" eol))
           do ((lambda (fullname name javadoc-dirname)
                 (with-current-buffer buf
-                  (insert (acjd-allclasses-propertize fullname))
-                  (add-text-properties
-                   (line-beginning-position) (1+ (line-beginning-position))
-                   `(,@'()
-                        acjd-simple-name ,name
-                        acjd-dirname     ,javadoc-dirname))
-                  (insert "\n")))
+                  (insert (concat (acjd-allclasses-propertize fullname) "\n"
+                                  "\t" name "\t" javadoc-dirname "\n"))))
               (replace-regexp-in-string "/" "." (match-string 1))
               (match-string 2)
               (file-name-directory (acjd-fix-url-scheme filename))))))
